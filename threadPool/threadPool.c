@@ -4,6 +4,7 @@
 
 #define DEFAULT_MIN_THREADS 5
 #define DEFAULT_MAX_THREADS 10
+#define DEFAULT_QUEUE_CAPACITY 10
 
 /* 状态码 */
 enum STATUS_CODE
@@ -12,7 +13,7 @@ enum STATUS_CODE
     NULL_PTR,
     MALLOC_ERROR,
     INVALID_ACCESS,
-    UNKONWN_ERROR
+    UNKNOWN_ERROR
 };
 
 void *threadHander(void *arg)
@@ -22,7 +23,7 @@ void *threadHander(void *arg)
 }
 
 /* 线程池初始化 */
-int threadPoolInit(threadPool_t *pool, int minThreads, int maxThreads)
+int threadPoolInit(threadPool_t *pool, int minThreads, int maxThreads, int queueCapacity)
 {
     if (!pool)
     {
@@ -31,7 +32,7 @@ int threadPoolInit(threadPool_t *pool, int minThreads, int maxThreads)
     do
     {
         /* 判断合法性 */
-        if (minThreads < 0 || maxThreads < 0 || minThreads > maxThreads)
+        if (minThreads <= 0 || maxThreads <= 0 || minThreads >= maxThreads)
         {
             minThreads = DEFAULT_MIN_THREADS;
             maxThreads = DEFAULT_MAX_THREADS;
@@ -41,6 +42,27 @@ int threadPoolInit(threadPool_t *pool, int minThreads, int maxThreads)
         pool->minThreads = minThreads;
         pool->maxThreads = maxThreads;
 
+        /* 判断合法性 */
+        if (queueCapacity <= 0)
+        {
+            queueCapacity = DEFAULT_QUEUE_CAPACITY;
+        }
+
+        /* 更新线程池 任务队列属性 */
+        pool->queueCapacity = queueCapacity;
+        pool->taskQueue = (task_t *)malloc(sizeof(task_t) * pool->queueCapacity);
+        if (pool->taskQueue == NULL)
+        {
+            perror("malloc error");
+            break;
+        }
+        /* 清除脏数据 */
+        memset(pool->taskQueue, 0, sizeof(task_t) * pool->queueCapacity);
+        pool->queueFront = 0;
+        pool->queueRear = 0;
+        pool->queueSize = 0;
+
+        /* 为线程ID分配堆空间 */
         pool->threadIds = (pthread_t)malloc(sizeof(pthread_t) * maxThreads);
         if (!pool->threadIds)
         {
@@ -65,16 +87,21 @@ int threadPoolInit(threadPool_t *pool, int minThreads, int maxThreads)
                 }
             }
         }
-
+        /* 此ret是创建线程函数的返回值 */
+        if (ret != 0)
+        {
+            break;
+        }
+        
         return ON_SUCCESS;
     } while(0);
-
     /* 程序执行到这个地方， 上面一定有失败 */
-    if (!pool->threadIds)
+
+    /* 回收堆空间 */
+    if (pool->taskQueue != NULL)
     {
-        free(pool->threadIds);
-        pool->threadIds = NULL;
-        return UNKONWN_ERROR;
+        free(pool->taskQueue);
+        pool->taskQueue = NULL;
     }
 
     /* 回收线程资源 */
@@ -86,7 +113,17 @@ int threadPoolInit(threadPool_t *pool, int minThreads, int maxThreads)
         }
     }
 
-    return ON_SUCCESS;
+    if (!pool->threadIds)
+    {
+        free(pool->threadIds);
+        pool->threadIds = NULL;
+
+    }
+
+
+
+
+    return UNKNOWN_ERROR;
 }
 
 /* 线程池销毁 */
